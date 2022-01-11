@@ -46,3 +46,14 @@ func (r *Room) RemoveClient(channel string) *Room {
 	}
 	return r
 }
+
+func (r *Room) SendChannelMessage(channel string, v interface{}) error {
+	client, ok := r.Clients[channel]
+	if ok {
+		err := client.Connection.WriteJSON(v)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}

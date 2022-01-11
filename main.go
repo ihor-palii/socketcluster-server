@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/handlers"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -12,7 +12,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/pbnjay/memory"
 
+	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/handlers"
 	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/subscribers"
+	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/utils"
 )
 
 var (
@@ -28,9 +30,51 @@ var (
 	}
 )
 
+type newMsgPayload struct {
+	ID          string      `json:"id"`
+	Text        string      `json:"text"`
+	To          string      `json:"to"`
+	ToNoPlus    string      `json:"to_no_plus"`
+	From        string      `json:"from"`
+	FromNoPlus  string      `json:"from_no_plus"`
+	Channel     string      `json:"channel"`
+	Metadata    interface{} `json:"metadata"`
+	Attachments interface{} `json:"attachments"`
+}
+
 func receiveMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
-		// todo: send message to channel to specific room.
+		if err := r.ParseForm(); err != nil {
+			fmt.Fprintf(w, "ParseForm() err: %v", err)
+			return
+		}
+
+		payload := &newMsgPayload{}
+		err := utils.DecodeAndValidateJSON(payload, r)
+		if err != nil {
+			return
+		}
+
+		publishEventPayload := map[string]interface{}{
+			"event": "#publish",
+			"data": map[string]interface{}{
+				"channel": payload.To,
+				"data":    payload,
+			},
+		}
+		err = room.SendChannelMessage(payload.To, publishEventPayload)
+		if err != nil {
+			return
+		}
+
+		receivedMsgEventPayload := map[string]interface{}{
+			"event": "receivedMessageFromChannel",
+			"data":  payload,
+		}
+		err = room.SendChannelMessage(payload.To, receivedMsgEventPayload)
+		if err != nil {
+			return
+		}
 	} else {
 		// http.Redirect(w, r, "https://help.communityconnectlabs.com/support/home", 301)
 		tmpl, _ := template.ParseFiles("templates/index.html")
