@@ -14,8 +14,10 @@ type Client struct {
 	Id          string
 	ChannelUUID string
 	HostApi     string
+	UserUrn     string
 	UserToken   string
 	Connection  *websocket.Conn
+	Active      bool
 }
 
 func NewClient(r *http.Request, ws *websocket.Conn) *Client {
@@ -25,19 +27,14 @@ func NewClient(r *http.Request, ws *websocket.Conn) *Client {
 		HostApi:     r.URL.Query().Get("hostApi"),
 		UserToken:   r.URL.Query().Get("userToken"),
 		Connection:  ws,
+		Active:      true,
+		UserUrn:     "",
 	}
 }
 
 func (r *Room) AddClient(client *Client) *Room {
-	r.Clients[client.Id] = client
-	return r
-}
-
-func (r *Room) SendMessageToRoom(msgType int, message []byte) {
-	for _, client := range r.Clients {
-		if err := client.Connection.WriteMessage(msgType, message); err != nil {
-			// todo: add logging
-			continue
-		}
+	if client.UserUrn != "" {
+		r.Clients[client.UserUrn] = client
 	}
+	return r
 }

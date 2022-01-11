@@ -15,7 +15,7 @@ type WSMessage struct {
 	Data  json.RawMessage `json:"data"`
 }
 
-func HandleHandshakeMsg(client *subscribers.Client, msg *WSMessage, ch chan<-string) error {
+func HandleHandshakeMsg(client *subscribers.Client, msg *WSMessage, ch chan<- string) error {
 	handshake := map[string]interface{}{
 		"rid": msg.CID,
 		"data": map[string]interface{}{
@@ -34,7 +34,6 @@ func HandleHandshakeMsg(client *subscribers.Client, msg *WSMessage, ch chan<-str
 	return nil
 }
 
-
 type RegisterRequest struct {
 	Language string `json:"language"`
 }
@@ -49,7 +48,7 @@ type RegisterResponseData struct {
 	ContactUrn   string `json:"contact_urn"`
 }
 
-func HandleRegisterUser(client *subscribers.Client, msg* WSMessage) error {
+func HandleRegisterUser(client *subscribers.Client, msg *WSMessage) error {
 	reqData := &RegisterRequest{}
 	err := json.Unmarshal(msg.Data, reqData)
 	if err != nil {
@@ -58,9 +57,9 @@ func HandleRegisterUser(client *subscribers.Client, msg* WSMessage) error {
 
 	registerUrl := fmt.Sprintf("%s/c/wch/%s/register", client.HostApi, client.ChannelUUID)
 	postBody, _ := json.Marshal(map[string]string{
-		"urn":      client.Id,
+		"urn":        client.Id,
 		"user_token": client.UserToken,
-		"language": utils.GetLanguage(reqData.Language),
+		"language":   utils.GetLanguage(reqData.Language),
 	})
 	req, _ := http.NewRequest(http.MethodPost, registerUrl, bytes.NewReader(postBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -77,8 +76,8 @@ func HandleRegisterUser(client *subscribers.Client, msg* WSMessage) error {
 	}
 
 	finalData := map[string]string{
-		"urn": registerResponse.Data[0].ContactUrn,
-		"uuid": registerResponse.Data[0].ContactUUID,
+		"urn":   registerResponse.Data[0].ContactUrn,
+		"uuid":  registerResponse.Data[0].ContactUUID,
 		"token": registerResponse.Data[0].ContactToken,
 	}
 	finalDataEncoded, err := json.Marshal(finalData)
@@ -86,7 +85,7 @@ func HandleRegisterUser(client *subscribers.Client, msg* WSMessage) error {
 		return err
 	}
 	responseJSON := map[string]interface{}{
-		"rid": msg.CID,
+		"rid":   msg.CID,
 		"error": string(finalDataEncoded),
 	}
 
@@ -113,7 +112,7 @@ type GetHistoryResponseData struct {
 	Attachments interface{} `json:"attachments"`
 }
 
-func HandleGetHistory (client *subscribers.Client, msg *WSMessage) error {
+func HandleGetHistory(client *subscribers.Client, msg *WSMessage) error {
 	reqData := &GetHistoryRequest{}
 	err := json.Unmarshal(msg.Data, reqData)
 	if err != nil {
@@ -141,11 +140,40 @@ func HandleGetHistory (client *subscribers.Client, msg *WSMessage) error {
 		return err
 	}
 	responseJSON := map[string]interface{}{
-		"rid": msg.CID,
+		"rid":   msg.CID,
 		"error": string(finalDataEncoded),
 	}
 
 	err = client.Connection.WriteJSON(responseJSON)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type SendMessageRequest struct {
+	Text     string `json:"text"`
+	UserURN  string `json:"userUrn"`
+	UserUUID string `json:"userUuid"`
+}
+
+func HandleSendMessageToChannel(client *subscribers.Client, msg *WSMessage) error {
+	reqData := &SendMessageRequest{}
+	err := json.Unmarshal(msg.Data, reqData)
+	if err != nil {
+		return err
+	}
+
+	getHistoryUrl := fmt.Sprintf("%s/c/wch/%s/receive", client.HostApi, client.ChannelUUID)
+	postBody, _ := json.Marshal(map[string]string{
+		"from":           reqData.UserURN,
+		"text":           reqData.Text,
+		"attachment_url": "",
+	})
+	req, _ := http.NewRequest(http.MethodPost, getHistoryUrl, bytes.NewReader(postBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	_, err = utils.MakeHTTPRequest(req)
 	if err != nil {
 		return err
 	}
