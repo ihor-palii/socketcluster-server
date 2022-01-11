@@ -48,9 +48,9 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 	client := subscribers.NewClient(r, ws)
 	client.Connection.SetCloseHandler(func(code int, text string) error {
 		client.Active = false
+		room.RemoveClient(client.UserUrn)
 		message := websocket.FormatCloseMessage(code, "")
-		client.Connection.WriteControl(websocket.CloseMessage, message, time.Now().Add(time.Second))
-		return nil
+		return client.Connection.WriteControl(websocket.CloseMessage, message, time.Now().Add(time.Second))
 	})
 
 	// ping pong goroutine to keep connection with socketcluster
@@ -58,16 +58,18 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 	defer close(pingPongChannel)
 	go func() {
 		for {
-			if client.Active {
-				select {
-				case pongMessage := <-pingPongChannel:
-					if pongMessage == "#2" {
-						time.Sleep(10 * time.Second)
+			select {
+			case pongMessage := <-pingPongChannel:
+				if pongMessage == "#2" {
+					time.Sleep(10 * time.Second)
+					if client.Active {
 						err = client.Connection.WriteMessage(websocket.TextMessage, []byte("#1"))
 						if err != nil {
-							log.Println("Something went wrong", err)
+							log.Println("Failed to send ping message:", err)
 							return
 						}
+					} else {
+						return
 					}
 				}
 			}
@@ -117,10 +119,14 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 						err = handlers.HandleSendMessageToChannel(client, msg)
 						if err != nil {
 							log.Println("Failed to send message:", err)
-							return
+							continue
 						}
 					} else if msg.Event == "#subscribe" {
-						log.Println(string(msg.Data))
+						err = handlers.HandleSubscribe(client, msg, room)
+						if err != nil {
+							log.Println("Failed to subscribe:", err)
+							return
+						}
 					}
 				}
 			}
@@ -153,14 +159,11 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	tmpl.Execute(w, data)
 }
 
-func setupRoutes() {
+func main() {
+	log.Println("CCL Websocket Server Running...")
+
 	http.HandleFunc("/", receiveMessage)
 	http.HandleFunc("/ping", handlePing)
 	http.HandleFunc("/socketcluster/", webSocketHandler)
-}
-
-func main() {
-	log.Println("CCL Websocket Server Running...")
-	setupRoutes()
 	log.Fatal(http.ListenAndServe(":9090", nil))
 }

@@ -38,3 +38,11 @@ func (r *Room) AddClient(client *Client) *Room {
 	}
 	return r
 }
+
+func (r *Room) RemoveClient(channel string) *Room {
+	_, ok := r.Clients[channel]
+	if ok {
+		delete(r.Clients, channel)
+	}
+	return r
+}

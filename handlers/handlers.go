@@ -179,3 +179,19 @@ func HandleSendMessageToChannel(client *subscribers.Client, msg *WSMessage) erro
 	}
 	return nil
 }
+
+type SubscribeRequest struct {
+	Channel string `json:"channel"`
+}
+
+func HandleSubscribe(client *subscribers.Client, msg *WSMessage, room *subscribers.Room) error {
+	reqData := &SubscribeRequest{}
+	err := json.Unmarshal(msg.Data, reqData)
+	if err != nil {
+		return err
+	}
+
+	client.UserUrn = reqData.Channel
+	room.AddClient(client)
+	return nil
+}
