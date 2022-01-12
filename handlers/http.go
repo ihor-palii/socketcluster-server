@@ -1,20 +1,17 @@
-package main
+package handlers
 
 import (
 	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"text/template"
-	"time"
-
 	"github.com/gorilla/websocket"
-	"github.com/pbnjay/memory"
-
-	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/handlers"
 	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/subscribers"
 	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/utils"
+	"github.com/pbnjay/memory"
+	"github.com/sirupsen/logrus"
+	"html/template"
+	"net/http"
+	"os"
+	"time"
 )
 
 var (
@@ -30,6 +27,10 @@ var (
 	}
 )
 
+func IndexHandler(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "https://help.communityconnectlabs.com/support/home", 301)
+}
+
 type newMsgPayload struct {
 	ID          string      `json:"id"`
 	Text        string      `json:"text"`
@@ -42,50 +43,72 @@ type newMsgPayload struct {
 	Attachments interface{} `json:"attachments"`
 }
 
-func receiveMessage(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		if err := r.ParseForm(); err != nil {
-			fmt.Fprintf(w, "ParseForm() err: %v", err)
-			return
-		}
+func ReceiveMessageHandler(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		fmt.Fprintf(w, "ParseForm() err: %v", err)
+		return
+	}
 
-		payload := &newMsgPayload{}
-		err := utils.DecodeAndValidateJSON(payload, r)
-		if err != nil {
-			return
-		}
+	payload := &newMsgPayload{}
+	err := utils.DecodeAndValidateJSON(payload, r)
+	if err != nil {
+		return
+	}
 
-		publishEventPayload := map[string]interface{}{
-			"event": "#publish",
-			"data": map[string]interface{}{
-				"channel": payload.To,
-				"data":    payload,
-			},
-		}
-		err = room.SendChannelMessage(payload.To, publishEventPayload)
-		if err != nil {
-			return
-		}
+	publishEventPayload := map[string]interface{}{
+		"event": "#publish",
+		"data": map[string]interface{}{
+			"channel": payload.To,
+			"data":    payload,
+		},
+	}
+	err = room.SendChannelMessage(payload.To, publishEventPayload)
+	if err != nil {
+		return
+	}
 
-		receivedMsgEventPayload := map[string]interface{}{
-			"event": "receivedMessageFromChannel",
-			"data":  payload,
-		}
-		err = room.SendChannelMessage(payload.To, receivedMsgEventPayload)
-		if err != nil {
-			return
-		}
-	} else {
-		// http.Redirect(w, r, "https://help.communityconnectlabs.com/support/home", 301)
-		tmpl, _ := template.ParseFiles("templates/index.html")
-		tmpl.Execute(w, nil)
+	receivedMsgEventPayload := map[string]interface{}{
+		"event": "receivedMessageFromChannel",
+		"data":  payload,
+	}
+	err = room.SendChannelMessage(payload.To, receivedMsgEventPayload)
+	if err != nil {
+		return
 	}
 }
 
-func webSocketHandler(w http.ResponseWriter, r *http.Request) {
+type pingPayload struct {
+	PID      int64
+	HostName string
+	UpTime   int64
+	FreeMem  int64
+}
+
+func PingHandler(w http.ResponseWriter, r *http.Request) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		logrus.Println(err)
+		hostname = ""
+		return
+	}
+
+	data := &pingPayload{
+		PID:      int64(os.Getpid()),
+		HostName: hostname,
+		UpTime:   int64(time.Since(startTime).Seconds()),
+		FreeMem:  int64(memory.FreeMemory()),
+	}
+	tmpl, _ := template.ParseFiles("templates/ping.html")
+	err = tmpl.Execute(w, data)
+	if err != nil {
+		logrus.Errorln(err)
+	}
+}
+
+func WebSocketConnectionHandler(w http.ResponseWriter, r *http.Request) {
 	ws, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println("Failed to Upgrade connection to WebSocket:", err)
+		logrus.Errorln("Failed to Upgrade connection to WebSocket:", err)
 		return
 	}
 
@@ -109,7 +132,7 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 					if client.Active {
 						err = client.Connection.WriteMessage(websocket.TextMessage, []byte("#1"))
 						if err != nil {
-							log.Println("Failed to send ping message:", err)
+							logrus.Errorln("Failed to send ping message:", err)
 							return
 						}
 					} else {
@@ -125,7 +148,7 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 		if client.Active {
 			msgType, rawData, err := client.Connection.ReadMessage()
 			if err != nil {
-				log.Println("Failed to read message:", err)
+				logrus.Errorln("Failed to read message:", err)
 				return
 			}
 
@@ -138,37 +161,37 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 				}
 
 				// handle json messages
-				msg := &handlers.WSMessage{}
+				msg := &WSMessage{}
 				jsonError := json.Unmarshal(rawData, msg)
 				if jsonError == nil {
 					if msg.Event == "#handshake" {
-						err = handlers.HandleHandshakeMsg(client, msg, pingPongChannel)
+						err = HandleHandshakeMsg(client, msg, pingPongChannel)
 						if err != nil {
-							log.Println("Failed to send handshake response message:", err)
+							logrus.Errorln("Failed to send handshake response message:", err)
 							return
 						}
 					} else if msg.Event == "registerUser" {
-						err = handlers.HandleRegisterUser(client, msg)
+						err = HandleRegisterUser(client, msg)
 						if err != nil {
-							log.Println("Failed to process register user:", err)
+							logrus.Errorln("Failed to process register user:", err)
 							return
 						}
 					} else if msg.Event == "getHistory" {
-						err = handlers.HandleGetHistory(client, msg)
+						err = HandleGetHistory(client, msg)
 						if err != nil {
-							log.Println("Failed to get history:", err)
+							logrus.Errorln("Failed to get history:", err)
 							return
 						}
 					} else if msg.Event == "sendMessageToChannel" {
-						err = handlers.HandleSendMessageToChannel(client, msg)
+						err = HandleSendMessageToChannel(client, msg)
 						if err != nil {
-							log.Println("Failed to send message:", err)
+							logrus.Errorln("Failed to send message:", err)
 							continue
 						}
 					} else if msg.Event == "#subscribe" {
-						err = handlers.HandleSubscribe(client, msg, room)
+						err = HandleSubscribe(client, msg, room)
 						if err != nil {
-							log.Println("Failed to subscribe:", err)
+							logrus.Errorln("Failed to subscribe:", err)
 							return
 						}
 					}
@@ -176,38 +199,4 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-}
-
-type PingData struct {
-	PID      int64
-	HostName string
-	UpTime   int64
-	FreeMem  int64
-}
-
-func handlePing(w http.ResponseWriter, r *http.Request) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Println(err)
-		hostname = ""
-		return
-	}
-
-	data := &PingData{
-		PID:      int64(os.Getpid()),
-		HostName: hostname,
-		UpTime:   int64(time.Since(startTime).Seconds()),
-		FreeMem:  int64(memory.FreeMemory()),
-	}
-	tmpl, _ := template.ParseFiles("templates/ping.html")
-	tmpl.Execute(w, data)
-}
-
-func main() {
-	log.Println("CCL Websocket Server Running...")
-
-	http.HandleFunc("/", receiveMessage)
-	http.HandleFunc("/ping", handlePing)
-	http.HandleFunc("/socketcluster/", webSocketHandler)
-	log.Fatal(http.ListenAndServe(":9090", nil))
 }
