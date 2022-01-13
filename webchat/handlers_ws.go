@@ -1,10 +1,10 @@
-package handlers
+package webchat
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/subscribers"
 	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/utils"
 	"net/http"
 )
@@ -15,8 +15,8 @@ type WSMessage struct {
 	Data  json.RawMessage `json:"data"`
 }
 
-func HandleHandshakeMsg(client *subscribers.Client, msg *WSMessage, ch chan<- string) error {
-	handshake := map[string]interface{}{
+func HandleHandshakeMsg(client *Client, msg *WSMessage) error {
+	client.send <- map[string]interface{}{
 		"rid": msg.CID,
 		"data": map[string]interface{}{
 			"id":              client.Id,
@@ -24,13 +24,6 @@ func HandleHandshakeMsg(client *subscribers.Client, msg *WSMessage, ch chan<- st
 			"isAuthenticated": false,
 		},
 	}
-	err := client.Connection.WriteJSON(handshake)
-	if err != nil {
-		return err
-	}
-
-	// put pong message to channel to start first ping message sending
-	ch <- "#2"
 	return nil
 }
 
@@ -48,7 +41,7 @@ type RegisterResponseData struct {
 	ContactUrn   string `json:"contact_urn"`
 }
 
-func HandleRegisterUser(client *subscribers.Client, msg *WSMessage) error {
+func HandleRegisterUser(client *Client, msg *WSMessage) error {
 	reqData := &RegisterRequest{}
 	err := json.Unmarshal(msg.Data, reqData)
 	if err != nil {
@@ -75,23 +68,18 @@ func HandleRegisterUser(client *subscribers.Client, msg *WSMessage) error {
 		return err
 	}
 
-	finalData := map[string]string{
+	response := map[string]string{
 		"urn":   registerResponse.Data[0].ContactUrn,
 		"uuid":  registerResponse.Data[0].ContactUUID,
 		"token": registerResponse.Data[0].ContactToken,
 	}
-	finalDataEncoded, err := json.Marshal(finalData)
+	responseEncoded, err := json.Marshal(response)
 	if err != nil {
 		return err
 	}
-	responseJSON := map[string]interface{}{
+	client.send <- map[string]interface{}{
 		"rid":   msg.CID,
-		"error": string(finalDataEncoded),
-	}
-
-	err = client.Connection.WriteJSON(responseJSON)
-	if err != nil {
-		return err
+		"error": string(responseEncoded),
 	}
 	return nil
 }
@@ -112,11 +100,15 @@ type GetHistoryResponseData struct {
 	Attachments interface{} `json:"attachments"`
 }
 
-func HandleGetHistory(client *subscribers.Client, msg *WSMessage) error {
+func HandleGetHistory(client *Client, msg *WSMessage) error {
 	reqData := &GetHistoryRequest{}
 	err := json.Unmarshal(msg.Data, reqData)
 	if err != nil {
 		return err
+	}
+
+	if reqData.UserToken != client.UserToken {
+		return errors.New("Tokens do not match. ")
 	}
 
 	getHistoryUrl := fmt.Sprintf("%s/c/wch/%s/history", client.HostApi, client.ChannelUUID)
@@ -135,18 +127,13 @@ func HandleGetHistory(client *subscribers.Client, msg *WSMessage) error {
 		return err
 	}
 
-	finalDataEncoded, err := json.Marshal(historyResponse.Data[0])
+	responseEncoded, err := json.Marshal(historyResponse.Data[0])
 	if err != nil {
 		return err
 	}
-	responseJSON := map[string]interface{}{
+	client.send <- map[string]interface{}{
 		"rid":   msg.CID,
-		"error": string(finalDataEncoded),
-	}
-
-	err = client.Connection.WriteJSON(responseJSON)
-	if err != nil {
-		return err
+		"error": string(responseEncoded),
 	}
 	return nil
 }
@@ -157,7 +144,7 @@ type SendMessageRequest struct {
 	UserUUID string `json:"userUuid"`
 }
 
-func HandleSendMessageToChannel(client *subscribers.Client, msg *WSMessage) error {
+func HandleSendMessageToChannel(client *Client, msg *WSMessage) error {
 	reqData := &SendMessageRequest{}
 	err := json.Unmarshal(msg.Data, reqData)
 	if err != nil {
@@ -184,7 +171,7 @@ type SubscribeRequest struct {
 	Channel string `json:"channel"`
 }
 
-func HandleSubscribe(client *subscribers.Client, msg *WSMessage, room *subscribers.Room) error {
+func HandleSubscribe(client *Client, msg *WSMessage) error {
 	reqData := &SubscribeRequest{}
 	err := json.Unmarshal(msg.Data, reqData)
 	if err != nil {
@@ -192,6 +179,21 @@ func HandleSubscribe(client *subscribers.Client, msg *WSMessage, room *subscribe
 	}
 
 	client.UserUrn = reqData.Channel
-	room.AddClient(client)
+	client.hub.register <- client
 	return nil
+}
+
+func HandleWSMessage(client *Client, msg *WSMessage) (error, string) {
+	if msg.Event == "#handshake" {
+		return HandleHandshakeMsg(client, msg), "Failed to send handshake response message:"
+	} else if msg.Event == "registerUser" {
+		return HandleRegisterUser(client, msg), "Failed to process register user:"
+	} else if msg.Event == "getHistory" {
+		return HandleGetHistory(client, msg), "Failed to get history:"
+	} else if msg.Event == "sendMessageToChannel" {
+		return HandleSendMessageToChannel(client, msg), "Failed to send message:"
+	} else if msg.Event == "#subscribe" {
+		return HandleSubscribe(client, msg), "Failed to subscribe:"
+	}
+	return nil, ""
 }

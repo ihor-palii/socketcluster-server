@@ -2,17 +2,20 @@ package main
 
 import (
 	"github.com/evalphobia/logrus_sentry"
-	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/handlers"
+	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/webchat"
 	"github.com/sirupsen/logrus"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
-	webchat "github.com/greatnonprofits-nfp/ccl-chatbot/server/v2"
+	server "github.com/greatnonprofits-nfp/ccl-chatbot/server/v2"
 )
 
 func main() {
-	config := webchat.LoadConfig("chatbot_server.toml")
+	serverStartTime := time.Now()
+	config := server.LoadConfig("chatbot_server.toml")
 
 	// configure our logger
 	logrus.SetOutput(os.Stdout)
@@ -35,12 +38,17 @@ func main() {
 		logrus.StandardLogger().Hooks.Add(hook)
 	}
 
-	server := webchat.NewServer(config)
-	server.Router().Get("/", handlers.IndexHandler)
-	server.Router().Post("/", handlers.ReceiveMessageHandler)
-	server.Router().Get("/ping", handlers.PingHandler)
-	server.Router().Get("/socketcluster", handlers.WebSocketConnectionHandler)
-	err = server.Start()
+	// start hub to be able to receive msgs from courier
+	hub := webchat.NewHub()
+	go hub.Run()
+
+	// run server with main routes
+	s := server.NewServer(config)
+	s.Router().Get("/", webchat.Index)
+	s.Router().Post("/", func(w http.ResponseWriter, r *http.Request) { webchat.MessageReceived(hub, w, r) })
+	s.Router().Get("/ping", func(w http.ResponseWriter, r *http.Request) { webchat.Ping(serverStartTime, w, r) })
+	s.Router().Get("/socketcluster", func(w http.ResponseWriter, r *http.Request) { webchat.ServeWS(hub, w, r) })
+	err = s.Start()
 	if err != nil {
 		logrus.Fatalf("Error starting server: %s", err)
 	}
@@ -49,5 +57,5 @@ func main() {
 	ch := make(chan os.Signal)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	logrus.WithField("comp", "main").WithField("signal", <-ch).Info("stopping")
-	server.Stop()
+	s.Stop()
 }
