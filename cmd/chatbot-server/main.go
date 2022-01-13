@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/evalphobia/logrus_sentry"
-	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/webchat"
+	"github.com/greatnonprofits-nfp/websocket-go/webchat"
 	"github.com/sirupsen/logrus"
 	"net/http"
 	"os"
@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	server "github.com/greatnonprofits-nfp/ccl-chatbot/server/v2"
+	server "github.com/greatnonprofits-nfp/websocket-go"
 )
 
 func main() {

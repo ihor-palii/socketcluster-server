@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/utils"
+	"github.com/greatnonprofits-nfp/websocket-go/utils"
 	"net/http"
 )
 

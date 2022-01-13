@@ -1,4 +1,4 @@
-module github.com/greatnonprofits-nfp/ccl-chatbot/server/v2
+module github.com/greatnonprofits-nfp/websocket-go
 
 go 1.17
 

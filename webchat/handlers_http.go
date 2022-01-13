@@ -3,7 +3,7 @@ package webchat
 import (
 	"fmt"
 	"github.com/chilts/sid"
-	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/utils"
+	"github.com/greatnonprofits-nfp/websocket-go/utils"
 	"github.com/pbnjay/memory"
 	"github.com/sirupsen/logrus"
 	"html/template"

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
-	"github.com/greatnonprofits-nfp/ccl-chatbot/server/v2/utils"
+	"github.com/greatnonprofits-nfp/websocket-go/utils"
 	"github.com/sirupsen/logrus"
 	"net/http"
 	"sync"
